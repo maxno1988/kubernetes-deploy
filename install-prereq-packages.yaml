@@ -1,0 +1,24 @@
+---
+- hosts: all
+  gather_facts: false
+  tasks:
+    - name: Copy linux packages
+      copy:
+        src: linux-packages
+        dest: /opt
+
+    - name: Install prerequisite packages in the right order
+      apt: 
+        deb: "/opt/linux-packages/{{ item }}"
+      with_items:
+        - apt-transport-https_2.0.2_all.deb
+        - conntrack_1.4.5-2_amd64.deb
+        - ebtables_2.0.11-3build1_amd64.deb
+        - ethtool_5.4-1_amd64.deb
+        - socat_1.7.3.3-2_amd64.deb
+        - libcurl4_7.68.0-1ubuntu2_amd64.deb
+        - curl_7.68.0-1ubuntu2_amd64.deb
+        - containerd.io_1.6.4-1_amd64.deb
+        - docker-ce-cli_20.10.16~3-0~ubuntu-focal_amd64.deb
+        - docker-ce_20.10.16~3-0~ubuntu-focal_amd64.deb
+      

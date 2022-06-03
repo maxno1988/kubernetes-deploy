@@ -1,0 +1,110 @@
+---
+- hosts: all
+  gather_facts: false
+  tasks:
+    - name: Copy kuber files and packages to the nodes 
+      copy:
+        src: kuber-packages
+        dest: /opt
+
+    - name: Create cni directory
+      file:
+        path: /opt/cni/bin
+        state: directory
+
+    - name: Unarchive CNI zip that is already on the remote machine
+      unarchive:
+        src: /opt/kuber-packages/cni-plugins-linux-amd64-v1.1.1.tgz
+        dest: /opt/cni/bin
+        remote_src: yes
+
+    - name: Unarchive CRI zip that is already on the remote machine
+      unarchive:
+        src: /opt/kuber-packages/crictl-v1.24.1-linux-amd64.tar.gz
+        dest: /usr/local/bin
+        remote_src: yes
+
+    - name: Copy kuber* binaries into /usr/local/bin
+      copy:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        remote_src: yes
+        mode: 'a+x'
+      with_items:
+        - { src: /opt/kuber-packages/kubeadm, dest: /usr/local/bin}
+        - { src: /opt/kuber-packages/kubelet, dest: /usr/local/bin}
+        - { src: /opt/kuber-packages/kubectl, dest: /usr/local/bin} 
+
+    - name: Create a directory
+      file:
+        path: /etc/systemd/system/kubelet.service.d
+        state: directory 
+
+    - name: Copy systemd.service unit files
+      copy:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        remote_src: yes
+      with_items:
+        - { src: /opt/kuber-packages/kubelet.service, dest: /etc/systemd/system/kubelet.service}
+        - { src: /opt/kuber-packages/10-kubeadm.conf, dest: /etc/systemd/system/kubelet.service.d/10-kubeadm.conf}
+
+    - name: Enable systemd for kubelet
+      service:
+        enabled: yes
+        name: kubelet
+
+- hosts: masternode
+  gather_facts: false
+  tasks:
+    - name: Copy k8s images 
+      copy:
+        src: k8s_images
+        dest: ./
+        owner: altynbek
+        
+    - name: Upload a new root cert into the ssl folder
+      copy: 
+        src: compose/certs/registry.crt
+        dest: /etc/ssl/certs/    
+   
+    - name: Restart certificate service
+      shell: update-ca-certificates 
+
+    - name: Generate a list of packages to install
+      shell: "ls k8s_images/"
+      register: image_list_raw
+
+      
+    - name: Edit the output list
+      set_fact:
+        image_list_ok: "{{ image_list_raw.stdout_lines }}"
+
+
+    - name: Upload k8s images into docker
+      shell: "docker load -i {{ item }}"
+      args:
+        chdir: k8s_images/
+      loop: "{{ image_list_ok }}"
+
+    - name: Tag the uploaded images
+      shell: "docker tag {{ item }} 192.168.59.109:5000/{{ item.split('/')[-1] }}"
+      args:
+        warn: false
+      loop: "{{ k8simages_list }}"
+
+
+    - name: Push the uploaded images into the docker registry
+      shell: "docker push 192.168.59.109:5000/{{ item.split('/')[-1] }}"
+      args:
+        warn: false
+      loop: "{{ k8simages_list }}"
+
+    - name: Push the uploaded images into containerd repo 
+      shell: "ctr -n k8s.io images pull 192.168.59.109:5000/{{ item.split('/')[-1] }}"
+      args:
+        warn: false
+      loop: "{{ k8simages_list }}"
+
+
+

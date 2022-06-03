@@ -1,0 +1,83 @@
+---
+- hosts: all
+  gather_facts: false
+  tasks:      
+    - name: Generate a containerd default config
+      shell: "containerd config default > /etc/containerd/config.toml"
+   
+    - name: Modify cgroup driver for containerd
+      lineinfile:
+        path: /etc/containerd/config.toml
+        regexp: 'SystemdCgroup = false'
+        line: "            SystemdCgroup = true"
+
+    - name: Restart containerd
+      service:
+        name: containerd
+        state: restarted
+
+    - name: Copy OS modules 
+      copy: 
+        src: "{{ item.src }}" 
+        dest: "{{ item.dest }}" 
+      with_items:
+        - { src: os-modules/containerd.conf, dest: /etc/modules-load.d }
+        - { src: os-modules/99-kubernetes-cri.conf, dest: /etc/sysctl.d }
+
+    - name: Load modules and restart sysctl settings, disable swap
+      shell: |
+         modprobe overlay
+         modprobe br_netfilter
+         sysctl --system
+         swapoff -a
+         sed -i.bak -r 's/(.+ swap .+)/#\1/' /etc/fstab  
+
+- hosts: masternode
+  gather_facts: false
+  tasks:
+    - name: Copy docker registry related files
+      copy:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}" 
+        group: altynbek
+      with_items:
+        - { src: docker-images/registry.tar, dest: docker-images/}
+        - { src: docker-images/nginx.tar, dest: docker-images/}
+        - { src: docker-images/docker-compose, dest: /usr/local/bin}
+        - { src: docker-images/docker-compose.yaml, dest: compose/}
+        - { src: certs, dest: compose/ }  
+        - { src: certs/registry.crt, dest: /etc/docker/certs.d/192.168.59.109:5000/ }
+      
+
+    - name: Make docker-compose executable
+      file:
+        path: /usr/local/bin/docker-compose
+        mode: 'a+x'     
+          
+    - name: Add 'altynbek' user into the docker group
+      user:
+        name: altynbek
+        groups: docker
+        append: yes
+
+    - name: Upload the registry image into docker 
+      shell: | 
+         docker image load -i docker-images/registry.tar
+         docker image load -i docker-images/nginx.tar          
+
+    
+    - name: Restart docker
+      service:
+        name: docker
+        state: restarted
+
+    - name: Run docker-compose and load my nginx image into the local docker registry
+      shell: | 
+        docker-compose up -d
+        sleep 5 
+        docker tag mynginx_image 192.168.59.109:5000/localnginx
+        docker push 192.168.59.109:5000/localnginx
+        sleep 10
+      args:  
+        chdir: compose 
+
