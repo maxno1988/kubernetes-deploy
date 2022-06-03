@@ -1,0 +1,30 @@
+---
+- hosts: masternode
+  tasks:
+    - name: initialize the cluster
+      shell: |
+         kubeadm init --cri-socket=/run/containerd/containerd.sock --image-repository=192.168.59.109:5000 --pod-network-cidr=10.211.0.0/16 \
+         --apiserver-advertise-address=192.168.59.109 > cluster_initialized.txt
+         sleep 10
+
+    - name: create .kube directory
+      become: no
+      file:
+        path: $HOME/.kube
+        state: directory
+        mode: 0755
+
+    - name: copy admin.conf to user's kube config
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /home/altynbek/.kube/config
+        remote_src: yes
+        owner: altynbek
+
+    - name: install Pod network
+      become: no
+      shell: kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml >> pod_network_setup.txt
+      args:
+        chdir: $HOME
+        creates: pod_network_setup.txt
+
